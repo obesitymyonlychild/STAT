@@ -1,0 +1,128 @@
+---
+title: "arima"
+author: "Fei Wu"
+date: '2022-11-09'
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+## Data Preparation
+```{r, echo = TRUE, include=FALSE, warning=FALSE}
+library(quantmod)
+library(lubridate)
+library(dplyr)
+
+btc0 <- read.csv("/Users/postgres/Desktop/457As/BTC-USD.csv")
+btc_test <- btc0[254: 263,]
+btc <- btc0[1: 253,]
+
+btc0 %>% arrange(mdy(btc0$Date))
+btc %>% arrange(mdy(btc$Date))
+btc_test %>% arrange(mdy(btc_test$Date))
+
+btcs0<-as.ts(btc0$Close)
+
+#time series of 253 weeks close price of BTC
+btcs<-as.ts(btc$Close)
+#time series of 10 true close values of BTC that we want to predict.
+btc_t<-as.ts(btc_test$Close)
+tlog<-log(btc_t)
+```
+
+## Diagnosis of Data
+```{r}
+library(tseries)
+
+#Check stationarity
+plot.ts(btcs,ylab = " adj close price", main="Plot of 253 weeks BTC-USD stock prices")
+par(mfrow=c(2, 1))
+acf(btcs, col = "darkblue")
+pacf(btcs, col = "darkblue")
+adf.test(btcs)
+
+#take the first difference and log return
+btc_fd <-diff(btcs, lag = 1, differences = 1)
+btc_log <- diff(log(btcs), lag=1)
+par(mfrow=c(2, 1))
+plot.ts(btc_fd)
+plot.ts(btc_log)
+acf(ts(btc_fd))
+acf(ts(btc_log))
+adf.test(btc_fd)
+adf.test(btc_log)
+```
+
+# fit the model & forecasting with models: 
+
+```{r}
+#arma
+library(forecast)
+fd_full<-diff(btcs0)
+log_full <-diff(log(btcs0), lag=1)
+
+auto_arima <- auto.arima(btc_fd)
+
+#check residuals 
+checkresiduals(auto_arima$residuals)
+Box.test(auto_arima$residuals)
+shapiro.test(auto_arima$residuals)
+
+#forecast
+fc <- forecast(auto_arima, level = .95, h=10)
+autoplot(btc_fd,main = 'Forecast BTc-USD',xlab = 'Week',ylab = '$')+
+  autolayer(fc, "Forecast")+
+  autolayer(fd_full,series = 'True')
+
+summary(auto_arima)
+  
+```
+We have stationary of the residuals, however the normality assumption of residuals is not satisfied by Shapiro-Wilk test. 
+
+# log diff 
+```{r}
+
+arma_fit_log <- auto.arima(btc_log)
+
+#check residuals 
+checkresiduals(arma_fit_log$residuals)
+Box.test(arma_fit_log$residuals)
+shapiro.test(arma_fit_log$residuals)
+
+
+fc_log <- forecast(arma_fit_log, level = .95, h=10)
+autoplot(btc_log,main = '.',xlab = 'week',ylab = 'BTC-USD')+
+  autolayer(fc_log, "pred")+
+  autolayer(log_full,series = 'FULL')
+
+
+summary(arma_fit_log)
+```
+
+## Garch 
+
+```{r}
+library(rugarch)
+garch_spec <- ugarchspec(variance.model=list(model="sGARCH", garchOrder=c(1,1)), mean.model=list(armaOrder=c(0,0)))
+gm <- ugarchfit(spec = garch_spec, data = btc_log)
+#fit_garch
+
+f <- ugarchforecast(fitORspec = gm, n.ahead = 10)
+
+
+setfixed(garch_spec) <- as.list(coef(gm))
+sim <- ugarchpath(spec = garch_spec,
+                  m.sim = 1,
+                  n.sim = 1*10,
+                  rseed = 16)
+plot.zoo(fitted(sim))
+plot.zoo(tlog)
+```
+
+
+
+
+
+
+
